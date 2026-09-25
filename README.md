@@ -7,6 +7,7 @@
 <p align="center"><strong>Give a silent Godot prototype a sound kit, then keep that sound identity as the game grows.</strong></p>
 
 <p align="center">
+  <img alt="Track 2: Livepeer Agent + OriginTrail DKG" src="https://img.shields.io/badge/track%202-Livepeer%20Agent%20%2B%20OriginTrail%20DKG-1c1b19">
   <img alt="Licence: MIT" src="https://img.shields.io/badge/licence-MIT-2b8c80">
   <img alt="Runtime: Bun 1.4" src="https://img.shields.io/badge/runtime-Bun%201.4-f4a259">
   <img alt="Godot 4.7.2" src="https://img.shields.io/badge/Godot-4.7.2-478cbf">
@@ -28,7 +29,14 @@ CueBound is for a solo developer or small team with a playable 2D game and no au
 
 The decisions you approved become a **sound brief** on an **OriginTrail DKG** node. A teammate, or a fresh session on another machine, can fetch that exact brief, prove it is the approved one, and add the next mechanic's sound in the same style without changing the sounds you already shipped.
 
-**Status:** working end to end against the real Livepeer network and a real DKG Edge Node on testnet, including one brief published to the DKG's Verifiable Memory on Base Sepolia. See [Limitations](#limitations-and-unfinished-work) for what is not done.
+| | |
+|---|---|
+| **Hackathon** | Livepeer Agent Hackathon, September 2026 |
+| **Track** | Track 2 · Livepeer Agent + OriginTrail DKG |
+| **Try it** | [cuebound.timidan.xyz](https://cuebound.timidan.xyz): the full app, one private project per visitor (see [Hosted demo](#hosted-demo)) |
+| **Demo video** | _to be added before submission_ |
+| **Review commit** | _frozen at submission; to be added_ |
+| **Status** | Working end to end against the real Livepeer network and a real DKG Edge Node on testnet, including one brief published to the DKG's Verifiable Memory on Base Sepolia. See [Limitations](#limitations-and-unfinished-work) for what is not done. |
 
 ## Contents
 
@@ -294,6 +302,8 @@ All routes are JSON on the local server; the full list with shapes is in [`lib/t
 - Livepeer Agent's demo credits are evaluation credits; no separate output-licensing terms were published for the Agent endpoint at the time of writing: https://agent.livepeer.org
 
 CueBound therefore treats generated audio as evaluation material, credits Mirelo in every exported pack (`manifest.json` and `HOOKUP.md`: "Sound effects powered by Mirelo AI"), and claims no commercial rights. Check the terms yourself before shipping generated sounds in a commercial game. CueBound's MIT licence covers its code, not the audio it renders.
+
+**Hackathon rules.** Public repository with an open-source licence; a README with setup, track, Livepeer use and limitations; a working main experience; no credentials, private keys, personal data or confidential media in the repository or in any knowledge asset; owned or permitted media only (the reference game's art is CC0, its clips are our own recordings); data boundaries as stated above.
 
 ## Licences and credits
 
