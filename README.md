@@ -7,7 +7,6 @@
 <p align="center"><strong>Give a silent Godot prototype a sound kit, then keep that sound identity as the game grows.</strong></p>
 
 <p align="center">
-  <img alt="Track 2: Livepeer Agent + OriginTrail DKG" src="https://img.shields.io/badge/track%202-Livepeer%20Agent%20%2B%20OriginTrail%20DKG-1c1b19">
   <img alt="Licence: MIT" src="https://img.shields.io/badge/licence-MIT-2b8c80">
   <img alt="Runtime: Bun 1.4" src="https://img.shields.io/badge/runtime-Bun%201.4-f4a259">
   <img alt="Godot 4.7.2" src="https://img.shields.io/badge/Godot-4.7.2-478cbf">
@@ -29,13 +28,7 @@ CueBound is for a solo developer or small team with a playable 2D game and no au
 
 The decisions you approved become a **sound brief** on an **OriginTrail DKG** node. A teammate, or a fresh session on another machine, can fetch that exact brief, prove it is the approved one, and add the next mechanic's sound in the same style without changing the sounds you already shipped.
 
-| | |
-|---|---|
-| **Hackathon** | Livepeer Agent Hackathon, September 2026 |
-| **Track** | Track 2 · Livepeer Agent + OriginTrail DKG |
-| **Demo video** | _to be added before submission_ |
-| **Review commit** | _frozen at submission; to be added_ |
-| **Status** | Working end to end against the real Livepeer network and a real DKG Edge Node on testnet, including one brief published to the DKG's Verifiable Memory on Base Sepolia. See [Limitations](#limitations-and-unfinished-work) for what is not done. |
+**Status:** working end to end against the real Livepeer network and a real DKG Edge Node on testnet, including one brief published to the DKG's Verifiable Memory on Base Sepolia. See [Limitations](#limitations-and-unfinished-work) for what is not done.
 
 ## Contents
 
@@ -85,7 +78,7 @@ Every sound in CueBound is rendered on the Livepeer Agent network. Generation is
 
 | | |
 |---|---|
-| Endpoint | `https://agent.livepeer.org/api/mcp/creative`, the creative MCP surface the hackathon packet requires |
+| Endpoint | `https://agent.livepeer.org/api/mcp/creative`, the creative MCP surface |
 | Tool | `create_media`, polled with `get_create_media`; the model card from `describe_capability`; spend from `get_cost_report` scoped to the project session |
 | Model | `mirelo-sfx` (`Mirelo-AI/sfx1.6/text-to-audio`), text to sound effect, 3 s minimum, about $0.0105 per second at list price |
 | Auth | Keyless demo credit by default; set `LIVEPEER_API_KEY` to send `Authorization: Bearer` |
@@ -230,6 +223,18 @@ Copy [`.env.example`](.env.example) to `.env` or export the variables. Every val
 
 `GET /api/health` reports whether ffmpeg, ffprobe, Godot, a zip tool, the DKG node and Livepeer are reachable.
 
+### Hosted demo
+
+[cuebound.timidan.xyz](https://cuebound.timidan.xyz) runs the same code with `HOSTED=1`, from the [`Dockerfile`](Dockerfile), next to its own DKG Edge Node on testnet. What changes in hosted mode:
+
+| Variable | Default | Hosted behaviour |
+|---|---|---|
+| `HOSTED` | unset | `1` gives each visitor their own project, chosen by a session cookie and stored under `DATA_DIR/sessions/` |
+| `SESSION_CAP_USD` | `1` | the most one visitor can spend; a higher spend limit is lowered to it |
+| `DAILY_CAP_USD` | `20` | the most all visitors together can spend per day |
+
+The pack import accepts only a pack folder this server exported (paste the folder shown on the Export screen). Publishing to testnet is turned off, because it writes to the public DKG for good; run CueBound locally to publish.
+
 ## Verify it
 
 ```bash
@@ -289,8 +294,6 @@ All routes are JSON on the local server; the full list with shapes is in [`lib/t
 - Livepeer Agent's demo credits are evaluation credits; no separate output-licensing terms were published for the Agent endpoint at the time of writing: https://agent.livepeer.org
 
 CueBound therefore treats generated audio as evaluation material, credits Mirelo in every exported pack (`manifest.json` and `HOOKUP.md`: "Sound effects powered by Mirelo AI"), and claims no commercial rights. Check the terms yourself before shipping generated sounds in a commercial game. CueBound's MIT licence covers its code, not the audio it renders.
-
-**Hackathon rules.** Public repository with an open-source licence; a README with setup, track, Livepeer use and limitations; a working main experience; no credentials, private keys, personal data or confidential media in the repository or in any knowledge asset; owned or permitted media only (the reference game's art is CC0, its clips are our own recordings); data boundaries stated above.
 
 ## Licences and credits
 
