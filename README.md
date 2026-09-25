@@ -34,8 +34,7 @@ The decisions you approved become a **sound brief** on an **OriginTrail DKG** no
 | **Hackathon** | Livepeer Agent Hackathon, September 2026 |
 | **Track** | Track 2 · Livepeer Agent + OriginTrail DKG |
 | **Try it** | [cuebound.timidan.xyz](https://cuebound.timidan.xyz): the full app, one private project per visitor (see [Hosted demo](#hosted-demo)) |
-| **Demo video** | _to be added before submission_ |
-| **Review commit** | _frozen at submission; to be added_ |
+| **Review commit** | tag [`hackathon-submission`](https://github.com/Timidan/cuebound/tree/hackathon-submission), the last commit on `main` at submission |
 | **Status** | Working end to end against the real Livepeer network and a real DKG Edge Node on testnet, including one brief published to the DKG's Verifiable Memory on Base Sepolia. See [Limitations](#limitations-and-unfinished-work) for what is not done. |
 
 ## Contents
