@@ -1,0 +1,13 @@
+{
+  "events": [
+    { "id": "jump", "label": "Jump", "description": "Small pixel hero springs up off a grassy tile", "recurring": true },
+    { "id": "land", "label": "Land", "description": "Small hero drops onto a grassy tile platform, kicking up dust", "recurring": true },
+    { "id": "pickup", "label": "Coin pickup", "description": "Hero touches a spinning gold coin; it floats up and fades out", "recurring": true },
+    { "id": "hurt", "label": "Hurt", "description": "Hero touches metal spikes, flashes red and is knocked back", "recurring": false },
+    { "id": "dash", "label": "Dash", "description": "Hero bursts forward through the air, leaving a trail of ghost images", "recurring": true },
+    { "id": "ui_click", "label": "UI click", "description": "Player presses the on-screen Reset coins button", "recurring": false },
+    { "id": "checkpoint", "label": "Checkpoint", "description": "A grey flag on a pole turns bright and starts waving as the hero passes", "recurring": false },
+    { "id": "level_complete", "label": "Level complete", "description": "Hero reaches the exit door and a Level complete banner appears", "recurring": false },
+    { "id": "respawn", "label": "Respawn", "description": "Hero blinks back into view at the last checkpoint after being hurt", "recurring": false }
+  ]
+}

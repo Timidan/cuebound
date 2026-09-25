@@ -1,0 +1,5 @@
+.agy-staff/
+node_modules/
+data*/
+.env
+.vscode/
