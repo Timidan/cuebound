@@ -289,18 +289,20 @@ function SaveBrief() {
               <label className="flex items-start gap-2 pointer-coarse:min-h-11 pointer-coarse:py-1">
                 <input checked={scope === "private"} className="mt-1" name="scope" onChange={() => setScope("private")} type="radio" />
                 <span>
-                  Only my node <span className="block text-[12px] text-muted-foreground">A fresh session on this computer can still use it.</span>
+                  Only my node <span className="block text-[12px] text-muted-foreground">A fresh session that uses the same DKG node can still use it.</span>
                 </span>
               </label>
-              <label className="flex items-start gap-2 pointer-coarse:min-h-11 pointer-coarse:py-1">
-                <input checked={scope === "published"} className="mt-1" name="scope" onChange={() => setScope("published")} type="radio" />
-                <span>
-                  Everyone on testnet{" "}
-                  <span className="block text-[12px] text-muted-foreground">
-                    Published on the OriginTrail testnet as a knowledge asset with its own address (UAL). Public and permanent. Uses test ETH and test TRAC from your node’s wallet; publishing is a separate step after saving.
+              {!S.hosted && (
+                <label className="flex items-start gap-2 pointer-coarse:min-h-11 pointer-coarse:py-1">
+                  <input checked={scope === "published"} className="mt-1" name="scope" onChange={() => setScope("published")} type="radio" />
+                  <span>
+                    Everyone on testnet{" "}
+                    <span className="block text-[12px] text-muted-foreground">
+                      Published on the OriginTrail testnet as a knowledge asset with its own address (UAL). Public and permanent. Uses test ETH and test TRAC from your node’s wallet; publishing is a separate step after saving.
+                    </span>
                   </span>
-                </span>
-              </label>
+                </label>
+              )}
             </fieldset>
             <AIApproval
               key={round}

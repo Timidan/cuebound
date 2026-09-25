@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
-import { mkdirSync, rmSync, statSync } from "node:fs";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { extname, join, relative, resolve, sep } from "node:path";
 import type { Cue, Direction, Job, JobStatus, Processing, Project, Receipt, SoundDesignBrief, State, Take } from "./lib/types";
 import * as lp from "./lib/livepeer";
@@ -16,24 +17,57 @@ const JOB_WAIT_MS = 180_000;
 const DEFAULT_PROCESSING: Processing = { gainDb: 0, trimStartMs: 0, maxDurationMs: 2000, fadeOutMs: 50 };
 const GENERATOR = { capability: lp.SFX_CAPABILITY, modelId: "Mirelo-AI/sfx1.6/text-to-audio", termsRef: "https://mirelo.ai/terms (unverified for demo credits)" };
 const BASELINE = "baseline"; // Take.jobId for audio imported from an approved pack; never re-rendered
+// Hosted: every visitor gets their own project in DATA_DIR/sessions/<hash of their cookie>, under spend caps.
+const HOSTED = process.env.HOSTED === "1";
+const SESSION_CAP_USD = Number(process.env.SESSION_CAP_USD ?? 1);
+const DAILY_CAP_USD = Number(process.env.DAILY_CAP_USD ?? 20);
 
-mkdirSync(DATA_DIR, { recursive: true });
-const db = new Database(join(DATA_DIR, "db.sqlite"));
-db.exec("PRAGMA journal_mode = WAL");
-for (const t of ["project", "cues", "directions", "jobs", "takes"]) {
-  db.exec(`CREATE TABLE IF NOT EXISTS ${t} (id TEXT PRIMARY KEY, data TEXT NOT NULL)`);
+type Space = { dir: string; db: Database };
+function openSpace(dir: string, file = join(dir, "db.sqlite")): Space {
+  if (file !== ":memory:") mkdirSync(dir, { recursive: true });
+  const d = new Database(file);
+  d.exec("PRAGMA journal_mode = WAL");
+  for (const t of ["project", "cues", "directions", "jobs", "takes"]) {
+    d.exec(`CREATE TABLE IF NOT EXISTS ${t} (id TEXT PRIMARY KEY, data TEXT NOT NULL)`);
+  }
+  d.exec("CREATE TABLE IF NOT EXISTS briefs (revision INTEGER PRIMARY KEY, digest TEXT NOT NULL, brief TEXT NOT NULL)");
+  d.exec("CREATE TABLE IF NOT EXISTS receipts (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL)");
+  // Crash recovery: a job still in flight when its data is opened has no known outcome.
+  for (const r of d.query("SELECT data FROM jobs").all() as any[]) {
+    const j: Job = JSON.parse(r.data);
+    if (j.status !== "intent" && j.status !== "submitted" && j.status !== "running") continue;
+    const error = j.providerJobId
+      ? "Server stopped before the outcome was known; reconcile with GET /api/jobs/:id."
+      : "Server stopped before a provider job id was recorded. Not retried; GET /api/jobs/:id replays by idempotency key within 24 h.";
+    d.query("UPDATE jobs SET data = ? WHERE id = ?").run(JSON.stringify({ ...j, status: "unknown", error }), j.id);
+  }
+  return { dir, db: d };
 }
-db.exec("CREATE TABLE IF NOT EXISTS briefs (revision INTEGER PRIMARY KEY, digest TEXT NOT NULL, brief TEXT NOT NULL)");
-db.exec("CREATE TABLE IF NOT EXISTS receipts (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL)");
 
-const all = <T>(t: string): T[] => db.query(`SELECT data FROM ${t} ORDER BY rowid`).all().map((r: any) => JSON.parse(r.data));
+const spaces = new AsyncLocalStorage<Space>();
+const local = HOSTED ? null : openSpace(DATA_DIR);
+const blank = openSpace(join(DATA_DIR, "sessions", "none"), ":memory:"); // what a visitor without a session reads
+const opened = new Map<string, Space>(); // ponytail: every session stays open; evict idle ones if sessions pile up
+const sessionSpace = (sid: string, create: boolean) => {
+  const key = new Bun.CryptoHasher("sha256").update(sid).digest("hex").slice(0, 32); // folder names never reveal the cookie
+  let s = opened.get(key);
+  const dir = join(DATA_DIR, "sessions", key);
+  if (!s && !create && !existsSync(dir)) return blank;
+  if (!s) opened.set(key, (s = openSpace(dir)));
+  return s;
+};
+const space = () => spaces.getStore() ?? local ?? blank;
+const db = () => space().db;
+const capped = (usd: number) => (HOSTED ? Math.min(usd, SESSION_CAP_USD) : usd);
+
+const all = <T>(t: string): T[] => db().query(`SELECT data FROM ${t} ORDER BY rowid`).all().map((r: any) => JSON.parse(r.data));
 const get = <T>(t: string, id: string): T | undefined => {
-  const r = db.query(`SELECT data FROM ${t} WHERE id = ?`).get(id) as any;
+  const r = db().query(`SELECT data FROM ${t} WHERE id = ?`).get(id) as any;
   return r ? JSON.parse(r.data) : undefined;
 };
 const put = (t: string, o: { id: string }) =>
-  db.query(`INSERT INTO ${t} (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data`).run(o.id, JSON.stringify(o));
-const abs = (rel: string) => join(DATA_DIR, rel);
+  db().query(`INSERT INTO ${t} (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data`).run(o.id, JSON.stringify(o));
+const abs = (rel: string) => join(space().dir, rel);
 const round = (n: number) => Math.round(n * 1e6) / 1e6;
 const project = () => all<Project>("project")[0] ?? null;
 
@@ -57,10 +91,11 @@ function state(): State {
     takes: all("takes"),
     jobs,
     directions: all("directions"),
-    briefs: db.query("SELECT revision, digest, brief FROM briefs ORDER BY revision").all()
+    briefs: db().query("SELECT revision, digest, brief FROM briefs ORDER BY revision").all()
       .map((r: any) => ({ revision: r.revision, digest: r.digest, brief: JSON.parse(r.brief) })),
     receipts: all("receipts"),
     spentUsd: spent(jobs),
+    ...(HOSTED ? { hosted: { spendCapUsd: SESSION_CAP_USD } } : {}),
   };
 }
 
@@ -112,6 +147,16 @@ const selectedDirection = () => {
 const durationFor = (c: Cue) => lp.sfxDuration(c.processing.maxDurationMs);
 const estimate = (durationS: number) => round(durationS * lp.SFX_USD_PER_SECOND);
 
+// ponytail: kept in memory, so a restart resets the day's total; persist it if restarts become frequent.
+let today = { date: "", usd: 0 };
+function assertDailyCap(costUsd: number) {
+  if (!HOSTED) return;
+  const date = new Date().toISOString().slice(0, 10);
+  if (today.date !== date) today = { date, usd: 0 };
+  if (today.usd + costUsd > DAILY_CAP_USD + 1e-9) fail(429, "This hosted demo has used today’s Livepeer budget. Nothing was sent. Try again tomorrow, or run CueBound on your own computer.");
+  today.usd += costUsd;
+}
+
 function assertCeiling(costUsd: number) {
   const p = requireProject();
   const now = spent();
@@ -123,7 +168,9 @@ function assertCeiling(costUsd: number) {
 
 // Intent rows are written synchronously before any remote call starts.
 function createJobs(specs: { cue: Cue; prompt: string }[], directionId = project()!.directionId): Job[] {
-  assertCeiling(specs.reduce((s, x) => s + estimate(durationFor(x.cue)), 0));
+  const cost = specs.reduce((s, x) => s + estimate(durationFor(x.cue)), 0);
+  assertCeiling(cost);
+  assertDailyCap(cost);
   const jobs: Job[] = specs.map(({ cue, prompt }) => ({
     id: crypto.randomUUID(),
     cueId: cue.id,
@@ -135,7 +182,7 @@ function createJobs(specs: { cue: Cue; prompt: string }[], directionId = project
     costUsd: estimate(durationFor(cue)),
     createdAt: new Date().toISOString(),
   }));
-  db.transaction(() => jobs.forEach((j) => put("jobs", j)))();
+  db().transaction(() => jobs.forEach((j) => put("jobs", j)))();
   // ponytail: no concurrency cap; add one if the provider rate-limits batches.
   for (const j of jobs) void exclusive(j.id, () => runJob(j.id));
   return jobs;
@@ -247,21 +294,21 @@ async function rerender(cue: Cue) {
 
 type BriefRow = { revision: number; digest: string; brief: SoundDesignBrief };
 const briefRow = (revision: number): BriefRow | undefined => {
-  const r = db.query("SELECT revision, digest, brief FROM briefs WHERE revision = ?").get(revision) as any;
+  const r = db().query("SELECT revision, digest, brief FROM briefs WHERE revision = ?").get(revision) as any;
   return r ? { revision: r.revision, digest: r.digest, brief: JSON.parse(r.brief) } : undefined;
 };
 const latestBrief = (): BriefRow | undefined => {
-  const r = db.query("SELECT revision FROM briefs ORDER BY revision DESC LIMIT 1").get() as any;
+  const r = db().query("SELECT revision FROM briefs ORDER BY revision DESC LIMIT 1").get() as any;
   return r ? briefRow(r.revision) : undefined;
 };
 const pinBrief = (b: SoundDesignBrief, d: string) => {
   try {
-    db.query("INSERT INTO briefs (revision, digest, brief) VALUES (?, ?, ?)").run(b.revision, d, canonicalize(b));
+    db().query("INSERT INTO briefs (revision, digest, brief) VALUES (?, ?, ?)").run(b.revision, d, canonicalize(b));
   } catch {
     fail(409, `Revision ${b.revision} already exists here. Approved revisions are never overwritten; review a new revision instead.`);
   }
 };
-const addReceipt = (r: Receipt) => db.query("INSERT INTO receipts (data) VALUES (?)").run(JSON.stringify(r));
+const addReceipt = (r: Receipt) => db().query("INSERT INTO receipts (data) VALUES (?)").run(JSON.stringify(r));
 const receiptResponse = (r: Receipt) => {
   addReceipt(r);
   return Response.json(r, { status: /^(failed|pending)/.test(r.status) ? 502 : 200 });
@@ -350,7 +397,7 @@ async function zipPack(outDir: string): Promise<{ zipPath: string | null; zipRea
   const p = Bun.spawn([tool, ...ZIPPERS[tool], "cuebound_pack.zip", "cuebound_pack"], { cwd: outDir, stdout: "ignore", stderr: "pipe" });
   const [err, code] = await Promise.all([new Response(p.stderr).text(), p.exited]);
   if (code !== 0) return { zipPath: null, zipReason: `${tool} exited ${code}: ${err.trim().slice(0, 300)}` };
-  return { zipPath: relative(DATA_DIR, join(outDir, "cuebound_pack.zip")) };
+  return { zipPath: relative(space().dir, join(outDir, "cuebound_pack.zip")) };
 }
 
 async function serveFile(base: string, rel: string, req: Request): Promise<Response> {
@@ -407,26 +454,44 @@ function extendPlan(b: any) {
   };
 }
 
-// Crash recovery: a job still in flight at startup has no known outcome.
-for (const j of all<Job>("jobs")) {
-  if (j.status === "intent" || j.status === "submitted" || j.status === "running") {
-    put("jobs", {
-      ...j,
-      status: "unknown",
-      error: j.providerJobId
-        ? "Server stopped before the outcome was known; reconcile with GET /api/jobs/:id."
-        : "Server stopped before a provider job id was recorded. Not retried; GET /api/jobs/:id replays by idempotency key within 24 h.",
-    });
+function errorResponse(e: unknown) {
+  if (e instanceof HttpError) return Response.json({ error: e.message }, { status: e.status });
+  if (e instanceof BriefError) return Response.json({ error: e.message }, { status: 400 });
+  console.error(e);
+  return Response.json({ error: msg(e) }, { status: 500 });
+}
+
+// The visitor's session cookie picks their space. Reading never creates a session; the first change does.
+const SESSION = /(?:^|;\s*)cuebound_session=([0-9a-f-]{36})(?:;|$)/;
+async function inSession(req: Request, handle: () => Response | Promise<Response>): Promise<Response> {
+  const had = SESSION.exec(req.headers.get("cookie") ?? "")?.[1];
+  const reading = req.method === "GET" || req.method === "HEAD";
+  const sid = had ?? (reading ? null : crypto.randomUUID());
+  let res: Response;
+  try {
+    res = await spaces.run(sid ? sessionSpace(sid, !reading) : blank, handle);
+  } catch (e) {
+    res = errorResponse(e);
   }
+  const secure = req.headers.get("x-forwarded-proto") === "https" ? "; Secure" : "";
+  if (sid && !had) res.headers.append("set-cookie", `cuebound_session=${sid}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax${secure}`);
+  return res;
+}
+
+function scoped<R extends Record<string, any>>(routes: R): R {
+  if (!HOSTED) return routes;
+  const wrap = (h: (req: any, srv: any) => any) => (req: Request, srv: unknown) => inSession(req, () => h(req, srv));
+  const each = (v: any) => (typeof v === "function" ? wrap(v) : Object.fromEntries(Object.entries(v).map(([m, h]) => [m, wrap(h as any)])));
+  return Object.fromEntries(Object.entries(routes).map(([k, v]) => [k, each(v)])) as R;
 }
 
 export function start(port = Number(process.env.PORT ?? 3000)) {
   return Bun.serve({
     port,
-    hostname: process.env.HOST ?? "127.0.0.1", // no auth: keep it on loopback
+    hostname: process.env.HOST ?? "127.0.0.1", // no auth: keep it on loopback unless HOSTED=1 isolates visitors
     idleTimeout: 120, // provider calls (cost report ~17 s) outlast Bun's 10 s default
     maxRequestBodySize: MAX_CLIP_BYTES + 1024 * 1024,
-    routes: {
+    routes: scoped({
       "/api/state": { GET: () => Response.json(state()) },
       "/api/health": { GET: async () => Response.json(await health()) },
 
@@ -452,7 +517,7 @@ export function start(port = Number(process.env.PORT ?? 3000)) {
           if (typeof b.name !== "string" || !b.name.trim()) fail(400, "name is required");
           if (!Number.isFinite(ceiling) || ceiling < 0) fail(400, "runCeilingUsd must be a non-negative number");
           const prev = project();
-          const p: Project = { ...prev, id: prev?.id ?? crypto.randomUUID(), name: b.name.trim(), brief: String(b.brief ?? ""), runCeilingUsd: ceiling };
+          const p: Project = { ...prev, id: prev?.id ?? crypto.randomUUID(), name: b.name.trim(), brief: String(b.brief ?? ""), runCeilingUsd: capped(ceiling) };
           put("project", p);
           return Response.json(p);
         },
@@ -495,8 +560,8 @@ export function start(port = Number(process.env.PORT ?? 3000)) {
             const old = prev.get(c.id);
             if (old && locked.has(c.id) && !Bun.deepEquals(old.processing, c.processing)) fail(409, `${c.eventId} comes from the approved pack, so its loudness and length can’t change here.`);
           }
-          db.transaction(() => {
-            db.exec("DELETE FROM cues");
+          db().transaction(() => {
+            db().exec("DELETE FROM cues");
             next.forEach((c) => put("cues", c));
           })();
           for (const c of next) {
@@ -530,8 +595,8 @@ export function start(port = Number(process.env.PORT ?? 3000)) {
               hierarchy: String(d.hierarchy ?? ""),
             };
           });
-          db.transaction(() => {
-            db.exec("DELETE FROM directions");
+          db().transaction(() => {
+            db().exec("DELETE FROM directions");
             next.forEach((d) => put("directions", d));
           })();
           return Response.json(next);
@@ -660,6 +725,7 @@ export function start(port = Number(process.env.PORT ?? 3000)) {
       // Testnet publication (mints on Base Sepolia). A pending outcome is reconciled, never re-submitted.
       "/api/brief/:revision/publish": {
         POST: async (req) => {
+          if (HOSTED) fail(403, "Publishing is turned off on this hosted demo: it writes to the public testnet for good. Run CueBound on your own computer to publish.");
           const rev = Number(req.params.revision);
           const rows = all<Receipt>("receipts").filter((r) => r.revision === rev);
           const shared = rows.findLast((r) => r.status === dkg.SHARED);
@@ -683,7 +749,7 @@ export function start(port = Number(process.env.PORT ?? 3000)) {
           const { brief, provenance } = got;
           const d = digest(brief);
           const p = project();
-          const ceiling = p ? p.runCeilingUsd : Number(b.runCeilingUsd);
+          const ceiling = p ? p.runCeilingUsd : capped(Number(b.runCeilingUsd));
           if (!Number.isFinite(ceiling) || ceiling < 0) fail(400, "Enter a spend limit for this session.");
           const expected = process.env.EXPECTED_PROJECT_ID;
           if (expected && brief.projectId !== expected) fail(409, `This brief belongs to project ${brief.projectId}, not the one this instance is set up for (${expected}).`);
@@ -694,7 +760,7 @@ export function start(port = Number(process.env.PORT ?? 3000)) {
           if (!pinned) pinBrief(brief, d);
           const dir: Direction = { id: `brief-r${brief.revision}`, ...brief.direction };
           put("directions", dir);
-          if (p && p.id !== brief.projectId) db.query("DELETE FROM project").run();
+          if (p && p.id !== brief.projectId) db().query("DELETE FROM project").run();
           put("project", { name: `Continued ${brief.projectId.slice(0, 8)}`, brief: "", runCeilingUsd: ceiling, ...p, id: brief.projectId, directionId: dir.id } satisfies Project);
           const status = empty ? "retrieved+verified-by-consumer" : "retrieved-by-this-instance";
           addReceipt({ revision: brief.revision, digest: d, layer: provenance.layer, network: dkg.NETWORK, reference, status, at: new Date().toISOString(), raw: { ...provenance, freshInstance: empty } });
@@ -710,7 +776,13 @@ export function start(port = Number(process.env.PORT ?? 3000)) {
           const pinned = latestBrief() ?? fail(400, "Fetch a brief first.");
           if (typeof b.dir !== "string" || !b.dir.trim()) fail(400, "Enter the folder of the approved pack (the exported cuebound_pack folder).");
           const dir = resolve(b.dir);
-          if (dir === DATA_DIR || dir.startsWith(DATA_DIR + sep)) fail(400, "Import a pack from outside this app’s data folder.");
+          if (HOSTED) {
+            // Only a pack this server exported: sessions/<id>/export/<time>/cuebound_pack, never any other folder.
+            const parts = relative(join(DATA_DIR, "sessions"), dir).split(sep);
+            if (parts.length !== 4 || parts[1] !== "export" || parts[3] !== "cuebound_pack" || parts.some((x) => !x || x === "..")) {
+              fail(400, "On this hosted demo, paste the pack folder shown on the Export screen.");
+            }
+          } else if (dir === DATA_DIR || dir.startsWith(DATA_DIR + sep)) fail(400, "Import a pack from outside this app’s data folder.");
           mkdirSync(abs(BASELINE), { recursive: true });
           const cues = new Map(all<Cue>("cues").map((c) => [c.eventId, c]));
           const files: { file: string; expected: string; actual: string | null; status: "match" | "mismatch" | "missing" }[] = [];
@@ -739,9 +811,9 @@ export function start(port = Number(process.env.PORT ?? 3000)) {
       "/api/cost-report": { GET: async () => Response.json(await lp.costReport(project()?.id)) },
 
       "/media/*": {
-        GET: (req) => serveFile(DATA_DIR, new URL(req.url).pathname.slice("/media/".length), req),
+        GET: (req) => serveFile(space().dir, new URL(req.url).pathname.slice("/media/".length), req),
       },
-    },
+    }),
 
     fetch(req) {
       const path = new URL(req.url).pathname;
@@ -749,17 +821,12 @@ export function start(port = Number(process.env.PORT ?? 3000)) {
       return serveFile(PUBLIC_DIR, path === "/" ? "index.html" : path.slice(1), req);
     },
 
-    error(e) {
-      if (e instanceof HttpError) return Response.json({ error: e.message }, { status: e.status });
-      if (e instanceof BriefError) return Response.json({ error: e.message }, { status: 400 });
-      console.error(e);
-      return Response.json({ error: msg(e) }, { status: 500 });
-    },
+    error: errorResponse,
   });
 }
 
 if (import.meta.main) {
   const server = start();
-  console.log(`CueBound on ${server.url} (DATA_DIR=${DATA_DIR})`);
+  console.log(`CueBound on ${server.url} (DATA_DIR=${DATA_DIR}${HOSTED ? ", hosted: one project per visitor" : ""})`);
 }
 

@@ -523,7 +523,7 @@ function BriefScroll() {
 const FACTS = [
   { id: "approve", title: "Only what you approve", text: "You see every field before it’s saved, and you can edit or remove it." },
   { id: "check", title: "Checked by fingerprint", text: "A teammate’s copy of the pack must match the brief byte for byte before anything new is made." },
-  { id: "private", title: "Your clip stays here", text: "Your clip never leaves this computer. The brief leaves out your full prompts and the takes you skipped." },
+  { id: "private", title: "Your clip stays out of it", text: "Your clip is never sent to Livepeer or saved in the brief. The brief also leaves out your full prompts and the takes you skipped." },
 ];
 
 export function Landing() {

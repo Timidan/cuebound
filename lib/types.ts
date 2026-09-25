@@ -116,6 +116,7 @@ export interface State {
   briefs: { revision: number; digest: string; brief: SoundDesignBrief }[];
   receipts: Receipt[];
   spentUsd: number; // estimated from jobs; provider cost report shown separately
+  hosted?: { spendCapUsd: number }; // set when the server runs with HOSTED=1
 }
 
 // Module seams:

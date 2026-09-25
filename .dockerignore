@@ -1,0 +1,8 @@
+.git
+**/node_modules
+web/dist
+data*
+.env
+.vscode
+.agy-staff
+mockGame/godot/.godot

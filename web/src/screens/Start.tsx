@@ -77,7 +77,7 @@ export function StartForm({ onDone }: { onDone?: () => void }) {
               <video className="media-edge h-16 w-28 rounded-lg bg-[#0d1426] object-cover" muted preload="metadata" src={mediaUrl(p!.clipPath!)} />
               <div className="min-w-0 flex-1">
                 <p className="font-medium">Clip added</p>
-                <p className="text-[0.8125rem] text-muted-foreground">It stays on this computer.</p>
+                <p className="text-[0.8125rem] text-muted-foreground">{S.hosted ? "Stored on this CueBound server with your project." : "It stays on this computer."}</p>
               </div>
               <button className="text-[0.8125rem] font-semibold text-orange-deep underline underline-offset-2" onClick={() => setReplacing(true)} type="button">
                 Replace
@@ -126,14 +126,19 @@ export function StartForm({ onDone }: { onDone?: () => void }) {
                 value={limit}
               />
             </span>
-            <span className="text-[0.8125rem] text-muted-foreground">One sound costs about $0.03. CueBound refuses any request that would go over.</span>
+            <span className="text-[0.8125rem] text-muted-foreground">
+              One sound costs about $0.03. CueBound refuses any request that would go over.
+              {S.hosted && ` This hosted demo caps it at $${S.hosted.spendCapUsd.toFixed(2)}.`}
+            </span>
           </span>
         </label>
 
         <div className="rounded-xl bg-paper p-4 text-[0.8125rem] leading-relaxed">
-          <p className="font-semibold">What leaves this computer</p>
+          <p className="font-semibold">{S.hosted ? "Where your data goes" : "What leaves this computer"}</p>
           <p className="mt-1 text-muted-foreground">
-            Only the short text prompts that describe each sound. They go to the Livepeer network, which generates the audio. Your clip stays here.
+            {S.hosted
+              ? "Your clip is stored on this CueBound server with your project. Only the short text prompts that describe each sound go to the Livepeer network, which generates the audio."
+              : "Only the short text prompts that describe each sound. They go to the Livepeer network, which generates the audio. Your clip stays here."}
           </p>
           {livepeer && (
             <p className={`mt-2 font-medium ${livepeer.ok ? "text-kept" : "text-destructive"}`}>

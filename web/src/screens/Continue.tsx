@@ -289,7 +289,7 @@ export function Continue() {
               aria-labelledby="pack-folder"
               className="min-w-0 flex-1 basis-64 rounded-xl border border-input bg-paper px-3.5 py-2.5 font-mono text-[13px]"
               onChange={(e) => setDir(e.target.value)}
-              placeholder="/home/you/Downloads/cuebound_pack"
+              placeholder={S.hosted ? "Paste the pack folder shown on the Export screen" : "/home/you/Downloads/cuebound_pack"}
               value={dir}
             />
             <DotMorphButton busy={busy === "import"} disabled={!dir.trim()} label="Import and check" tone="outline" type="submit" />
