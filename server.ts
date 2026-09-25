@@ -238,6 +238,11 @@ async function runJob(id: string) {
     return updateJob(id, { status: "unknown", error: `Livepeer didn’t answer (${msg(e)}). Nothing was retried. Use Try again within 24 hours; it is free.` });
   }
   applyProvider(id, pj);
+  await follow(id);
+}
+
+// Polls Livepeer until the job finishes, fails or runs past JOB_WAIT_MS.
+async function follow(id: string) {
   const started = Date.now();
   for (;;) {
     const j = get<Job>("jobs", id)!;
@@ -654,6 +659,8 @@ export function start(port = Number(process.env.PORT ?? 3000)) {
             } finally {
               busy.delete(id);
             }
+            // Still rendering after a slow first wait: keep following it instead of leaving it marked as rendering.
+            if (["submitted", "running"].includes(get<Job>("jobs", id)!.status)) void exclusive(id, () => follow(id));
           }
           return Response.json(get<Job>("jobs", id));
         },
