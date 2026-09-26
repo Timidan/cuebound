@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "ruleId": "hosted-session-isolation",
+  "rule": "In hosted mode, a visitor may read only the project selected by their own session cookie. A different visitor must not observe that project, and reads must not change project state.",
+  "adapter": "./rite.adapter.mjs",
+  "paths": [
+    {
+      "entry": "GET /api/state",
+      "sink": "sessionSpace",
+      "source": "server.ts"
+    }
+  ],
+  "cases": [
+    {
+      "id": "same-session-reads-own-project",
+      "path": "GET /api/state",
+      "actor": "same-session",
+      "input": {},
+      "expected": {
+        "decision": "allow",
+        "effects": [{ "project": "owner-secret" }],
+        "stateChanged": false
+      }
+    },
+    {
+      "id": "other-session-cannot-read-project",
+      "path": "GET /api/state",
+      "actor": "other-session",
+      "input": {},
+      "expected": {
+        "decision": "deny",
+        "effects": [],
+        "stateChanged": false
+      }
+    }
+  ]
+}
